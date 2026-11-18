@@ -1,0 +1,28 @@
+{
+  "name": "mccia-attendance",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCCIA Attendance - check-in/out, leave, WFH, holidays for interns & consultants",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "vite build client",
+    "start": "node server/index.js",
+    "reset-db": "node scripts/reset-db.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "test:reminders": "node scripts/reminders-test.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

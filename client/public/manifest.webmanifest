@@ -1,0 +1,9 @@
+{
+  "name": "MCCIA Attendance",
+  "short_name": "MCCIA Attend",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [{ "src": "logo.png", "sizes": "537x138", "type": "image/png", "purpose": "any" }]
+}
