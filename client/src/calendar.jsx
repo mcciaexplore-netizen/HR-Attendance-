@@ -120,7 +120,7 @@ export function DayCard({ day, reqs, shift, readOnly, bare, onClose, onAction, o
   const worked = ['upcoming', 'pending', 'absent'].includes(day.status);
   const canLeave = !readOnly && worked && !pend;
   const canWfh = !readOnly && ['upcoming', 'pending'].includes(day.status) && !day.wfh_approved && !pend;
-  const canFix = !readOnly && ['absent', 'missed', 'half'].includes(day.status);
+  const canFix = !readOnly && ['absent', 'missed'].includes(day.status); // a missed check-in or check-out
   const canOh = !readOnly && !!day.optional && !pend && day.date >= todayIst() && !['leave', 'holiday', 'weekend'].includes(day.status);
   const canComp = !readOnly && day.status === 'extra' && !!day.check_out;
   const canCancel = !readOnly && pend;

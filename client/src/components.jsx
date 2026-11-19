@@ -46,7 +46,6 @@ export function RemarkModal({ title, approve, onClose, onSubmit }) {
 }
 
 const TITLE = { leave: 'Apply leave', wfh: 'Work from home', fix: 'Correct attendance', comp: 'Request comp-off' };
-const yesterday = () => new Date(Date.now() - 864e5).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
 function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -223,22 +222,50 @@ function CompForm({ onDone }) {
 
 function FixForm({ date, onDone }) {
   const toast = useToast();
-  const [f, setF] = useState({ day: date && date < todayIst() ? date : yesterday(), check_in: '10:00', check_out: '18:00', reason: '' });
+  const { data } = useAsync(() => api('/regularizations/eligible'), []);
+  const [sel, setSel] = useState(date || '');
+  const [f, setF] = useState({ check_in: '', check_out: '', reason: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  if (!data) return <Spinner />;
+  const days = data.days;
+
+  if (!days.length) {
+    return (
+      <div className="stack">
+        <div className="alert">Nothing to correct.</div>
+        <p className="muted small" style={{ margin: 0 }}>A correction is only for a day when your <b>check-in or check-out was missed</b>, within the last {data.window} days. Today, upcoming days and days with both punches recorded cannot be corrected.</p>
+      </div>
+    );
+  }
+  const chosen = days.find((d) => d.date === sel) || days[0];
+  const outOnly = chosen.missing === 'out';
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true); setErr('');
-    try { await api('/regularizations', { method: 'POST', body: { date: f.day, check_in: f.check_in, check_out: f.check_out, reason: f.reason } }); toast('Correction sent for approval'); onDone(); }
-    catch (x) { setErr(x.message); setBusy(false); }
+    try {
+      await api('/regularizations', { method: 'POST', body: { date: chosen.date, check_in: outOnly ? chosen.check_in : f.check_in || data.shift.start, check_out: f.check_out || data.shift.end, reason: f.reason } });
+      toast('Correction sent for approval'); onDone();
+    } catch (x) { setErr(x.message); setBusy(false); }
   };
   return (
     <form className="stack" onSubmit={submit}>
-      <p className="muted small" style={{ margin: 0 }}>Forgot to check in or out? Enter the actual times and a reason. Your manager (or HR) will review it.</p>
-      <div className="field"><label>Date</label><input type="date" max={todayIst()} value={f.day} onChange={(e) => setF({ ...f, day: e.target.value })} required /></div>
+      <p className="muted small" style={{ margin: 0 }}>Pick the day you missed a check-in or check-out and enter the actual times. Your manager (or HR) will review it.</p>
+      <div className="field"><label>Day to correct</label>
+        <div className="stack" style={{ gap: 8 }}>
+          {days.map((d) => (
+            <label key={d.date} className={'pick ' + (chosen.date === d.date ? 'on' : '')}>
+              <input type="radio" name="fixday" checked={chosen.date === d.date} onChange={() => setSel(d.date)} />
+              <span><b>{fmtDate(d.date, { weekday: 'short', day: 'numeric', month: 'short' })}</b><br /><span className="muted small">{d.missing === 'out' ? `No check-out (you checked in at ${d.check_in})` : 'No check-in'}</span></span>
+            </label>
+          ))}
+        </div>
+      </div>
       <div className="grid g2">
-        <div className="field"><label>Check-in time</label><input type="time" value={f.check_in} onChange={(e) => setF({ ...f, check_in: e.target.value })} required /></div>
-        <div className="field"><label>Check-out time</label><input type="time" value={f.check_out} onChange={(e) => setF({ ...f, check_out: e.target.value })} /></div>
+        {outOnly
+          ? <div className="field"><label>Check-in</label><input value={chosen.check_in} disabled /></div>
+          : <div className="field"><label>Check-in time</label><input type="time" value={f.check_in || data.shift.start} onChange={(e) => setF({ ...f, check_in: e.target.value })} required /></div>}
+        <div className="field"><label>Check-out time</label><input type="time" value={f.check_out || data.shift.end} onChange={(e) => setF({ ...f, check_out: e.target.value })} required /></div>
       </div>
       <div className="field"><label>Reason</label><textarea value={f.reason} onChange={(e) => setF({ ...f, reason: e.target.value })} placeholder="e.g. Phone battery died / forgot to tap check-out" required /></div>
       {err && <div className="err" role="alert">{err}</div>}

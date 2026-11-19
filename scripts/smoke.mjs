@@ -218,7 +218,7 @@ r = await api('/leaves', { method: 'POST', token: aarav.token, body: { type_id: 
 ok('custom type can be applied', r.status === 200, JSON.stringify(r.data));
 r = await api('/leaves', { method: 'POST', token: meera.token, body: { type_id: elId, from_date: W[30], to_date: W[30], reason: 'Event' } });
 ok('"applies to" is enforced', r.status === 403, JSON.stringify(r.data));
-const sat = (() => { let d = addDays(today, 3); while (dow(d) !== 6) d = addDays(d, 1); return d; })();
+const sat = (() => { let d = addDays(today, 10); while (dow(d) !== 6) d = addDays(d, 1); return d; })();
 r = await api('/leaves', { method: 'POST', token: isha.token, body: { type_id: elId, from_date: sat, to_date: addDays(sat, 1), reason: 'Weekend event' } });
 ok('"count weekends" leave counts calendar days (Sat+Sun = 2)', r.status === 200 && r.data.days === 2, JSON.stringify(r.data));
 r = await api(`/leave-types/${elId}`, { method: 'PUT', token: hr.token, body: { name: 'Event Leave', quota: 3, color: '#ff00aa', active: false, applies_to: 'intern' } });
@@ -318,6 +318,51 @@ ok('birthday notice time must be HH:MM', (await api('/settings', { method: 'PUT'
 ok('it can be switched off and back on', (await api('/settings', { method: 'PUT', token: hr.token, body: { ...cur, remind_birthdays: '' } })).status === 200 && (await api('/settings', { method: 'PUT', token: hr.token, body: { ...cur, remind_birthdays: '09:00' } })).data.remind_birthdays === '09:00');
 r = await api('/announcements', { method: 'POST', token: hr.token, body: { title: 'Office closed Friday', body: 'Plan ahead' } });
 ok('announcements reach approvers too', r.status === 200 && (await api('/notifications', { token: anjali.token })).data.items.some((n) => n.title === 'Office closed Friday'));
+
+console.log('\nCorrections: only for a missed check-in or check-out');
+const people5 = { aarav, isha, rohan, meera, sahil };
+const eligAll = {};
+for (const [n, u] of Object.entries(people5)) eligAll[n] = (await api('/regularizations/eligible', { token: u.token })).data;
+const who = Object.entries(eligAll).find(([, e]) => e.days.length > 0);
+ok('days with a missed punch are offered for correction', !!who, 'no correctable day in the demo data');
+ok('every offered day is in the past and says which punch is missing', Object.values(eligAll).every((e) => e.days.every((d) => d.date < today && ['in', 'out'].includes(d.missing))));
+ok('the form gets the shift times and the window', eligAll.aarav.window === 31 && /^\d{2}:\d{2}$/.test(eligAll.aarav.shift.start));
+const fix = (u, body) => api('/regularizations', { method: 'POST', token: u.token, body: { reason: 'Forgot to punch', check_in: '10:00', check_out: '18:00', ...body } });
+let rg = await fix(aarav, { date: today });
+ok('today cannot be corrected', rg.status === 400 && /not over/.test(rg.data.error), JSON.stringify(rg.data));
+rg = await fix(aarav, { date: W[0] });
+ok('tomorrow / upcoming days cannot be corrected', rg.status === 400 && /upcoming/.test(rg.data.error), JSON.stringify(rg.data));
+ok('not even two or three days ahead', (await fix(aarav, { date: W[1] })).status === 400 && (await fix(aarav, { date: W[2] })).status === 400);
+rg = await fix(aarav, { date: addDays(today, -200) });
+ok('very old days are refused', rg.status === 400 && /last 31 days/.test(rg.data.error), JSON.stringify(rg.data));
+let off = addDays(today, -1); while (![0, 6].includes(dow(off))) off = addDays(off, -1);
+rg = await fix(aarav, { date: off });
+ok('a weekly off (nothing expected) cannot be corrected', rg.status === 400 && /weekly off|holiday/.test(rg.data.error), JSON.stringify(rg.data));
+let calDays = (await api(`/calendar?month=${today.slice(0, 7)}`, { token: aarav.token })).data.days;
+let full = calDays.find((d) => d.check_in && d.check_out && d.date < today);
+if (!full) { const pm = addDays(today.slice(0, 7) + '-01', -1).slice(0, 7); full = (await api(`/calendar?month=${pm}`, { token: aarav.token })).data.days.find((d) => d.check_in && d.check_out); }
+rg = await fix(aarav, { date: full?.date || addDays(today, -3) });
+ok('a day with both punches recorded cannot be corrected', rg.status === 400 && /nothing to correct/.test(rg.data.error), JSON.stringify(rg.data));
+ok('approvers have nothing to correct', (await api('/regularizations/eligible', { token: anjali.token })).data.days.length === 0 && (await fix(anjali, { date: addDays(today, -2) })).status === 403);
+if (who) {
+  const [name, e] = who, u = people5[name], day = e.days[0];
+  ok('a reason is required', (await fix(u, { date: day.date, reason: '' })).status === 400);
+  ok('the check-out time is required', (await fix(u, { date: day.date, check_out: '' })).status === 400);
+  ok('check-out must be after check-in', (await fix(u, { date: day.date, check_in: '10:00', check_out: '09:00' })).status === 400);
+  ok(`a missed ${day.missing === 'out' ? 'check-out' : 'check-in'} can be corrected`, (await fix(u, { date: day.date, check_in: '10:00', check_out: '18:15' })).status === 200);
+  ok('the same day cannot be sent twice', (await fix(u, { date: day.date })).status === 409);
+  ok('and it leaves the list while pending', !(await api('/regularizations/eligible', { token: u.token })).data.days.some((d) => d.date === day.date));
+  const pend = (await api('/approvals', { token: hr.token })).data.regs.find((g) => g.date === day.date && g.status === 'pending' && g.user_id === u.user.id);
+  ok('the request reaches the approver', !!pend);
+  ok('HR approves the correction', (await api(`/regularizations/${pend.id}/decision`, { method: 'POST', token: hr.token, body: { approve: true } })).status === 200);
+  const after = (await api(`/calendar?month=${day.date.slice(0, 7)}`, { token: u.token })).data.days.find((d) => d.date === day.date);
+  ok('the day now has both punches', !!after.check_in && !!after.check_out && after.regularized === true, JSON.stringify(after));
+  if (day.missing === 'out') ok('the recorded check-in is kept', new Date(after.check_in).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) === day.check_in);
+  rg = await fix(u, { date: day.date });
+  ok('a corrected day cannot be corrected again', rg.status === 400 && /nothing to correct/.test(rg.data.error), JSON.stringify(rg.data));
+}
+const curS = (await api('/settings', { token: hr.token })).data;
+ok('the corrections window is validated and editable', (await api('/settings', { method: 'PUT', token: hr.token, body: { ...curS, regularize_window_days: '0' } })).status === 400 && (await api('/settings', { method: 'PUT', token: hr.token, body: { ...curS, regularize_window_days: '31' } })).data.regularize_window_days === '31');
 
 console.log(`\n${pass} passed, ${failN} failed`);
 process.exit(failN ? 1 : 0);

@@ -241,17 +241,28 @@ export function createAttendanceRouter(db, { secret }) {
   r.get('/regularizations', (req, res) => {
     res.json(all('SELECT * FROM att_regularizations WHERE user_id=? ORDER BY id DESC LIMIT 200', req.user.id));
   });
+  // days that can be corrected (a missed check-in or check-out), with the shift times to prefill the form
+  r.get('/regularizations/eligible', wrap((req, res) => {
+    const shift = core.shiftOf(req.user);
+    res.json({
+      days: core.isUntracked(req.user) ? [] : core.regularizable(req.user),
+      window: settings().regularizeWindow, shift: { start: shift.start, end: shift.end },
+    });
+  }));
   r.post('/regularizations', wrap((req, res) => {
-    const { date, check_in, check_out, reason } = req.body;
+    const { date, check_out, reason } = req.body;
+    let { check_in } = req.body;
     if (core.isUntracked(req.user)) throw httpErr(403, 'HR and approver accounts do not punch attendance.');
-    if (!isDate(date) || date > ist().date) throw httpErr(400, 'Pick a past date');
-    if (date < req.user.start_date) throw httpErr(400, 'That date is before your joining date.');
-    if (!/^\d{2}:\d{2}$/.test(check_in || '') || (check_out && !/^\d{2}:\d{2}$/.test(check_out))) throw httpErr(400, 'Enter times as HH:MM');
-    if (check_out && check_out <= check_in) throw httpErr(400, 'Check-out must be after check-in');
+    if (!isDate(date)) throw httpErr(400, 'Pick the day to correct');
+    const chk = core.regularizeCheck(req.user, date);
+    if (chk.error) throw httpErr(400, chk.error);
+    if (chk.missing === 'out') check_in = ist(new Date(chk.day.check_in)).hhmm; // the recorded check-in stays; only the check-out is missing
+    if (!/^\d{2}:\d{2}$/.test(check_in || '') || !/^\d{2}:\d{2}$/.test(check_out || '')) throw httpErr(400, chk.missing === 'out' ? 'Enter the check-out time (HH:MM).' : 'Enter both the check-in and check-out time (HH:MM).');
+    if (check_out <= check_in) throw httpErr(400, 'Check-out must be after check-in');
     if (!String(reason || '').trim()) throw httpErr(400, 'Please add a reason');
     if (get("SELECT 1 FROM att_regularizations WHERE user_id=? AND date=? AND status='pending'", req.user.id, date)) throw httpErr(409, 'A request for this date is already pending');
-    run('INSERT INTO att_regularizations(user_id,date,check_in,check_out,reason) VALUES (?,?,?,?,?)', req.user.id, date, check_in, check_out || null, reason.trim());
-    core.notifyApprovers(req.user.id, 'approval', `Regularization: ${req.user.name}`, `${date} ${check_in}${check_out ? '–' + check_out : ''}`);
+    run('INSERT INTO att_regularizations(user_id,date,check_in,check_out,reason) VALUES (?,?,?,?,?)', req.user.id, date, check_in, check_out, reason.trim());
+    core.notifyApprovers(req.user.id, 'approval', `Regularization: ${req.user.name}`, `${date} ${check_in}–${check_out}`);
     res.json({ ok: true });
   }));
   r.post('/regularizations/:id/decision', wrap((req, res) => {

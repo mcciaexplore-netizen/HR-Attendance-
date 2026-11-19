@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS = {
   remind_approvals: '11:00',
   remind_birthdays: '09:00',     // daily birthday / work-anniversary notice; empty = off
   compoff_expiry_days: '60',     // comp-off is valid this many days from the day worked
+  regularize_window_days: '31',  // corrections (missed check-in / check-out) are allowed for this many past days
   compoff_window_days: '30',     // can request comp-off up to this many days after the day worked
   allowed_ips: '',               // optional: only allow office check-ins from these public IPs (prefix ending in "." allowed)
   late_marks_per_halfday: '0',   // 0 = off. e.g. 3 → every 3 late marks count as one half-day in reports
@@ -49,7 +50,7 @@ export function makeCore(db) {
     return {
       office: { name: o.office_name, lat: +o.office_lat, lng: +o.office_lng, radius: +o.radius_m },
       remindIn: list(o.remind_in), remindOut: list(o.remind_out), hrDigest: o.hr_digest, remindApprovals: o.remind_approvals, birthdayTime: o.remind_birthdays,
-      compoffExpiry: +o.compoff_expiry_days, compoffWindow: +o.compoff_window_days,
+      compoffExpiry: +o.compoff_expiry_days, compoffWindow: +o.compoff_window_days, regularizeWindow: +o.regularize_window_days,
       allowedIps: list(o.allowed_ips), lateMarks: +o.late_marks_per_halfday,
     };
   }
@@ -233,6 +234,32 @@ export function makeCore(db) {
     return out;
   }
 
+  // ---------- corrections (regularization) ----------
+  // A day can only be corrected when a punch was actually missed: no check-in at all, or a check-in without a check-out.
+  // Today, upcoming days, holidays, weekly offs, leave days and complete days are refused.
+  function regularizeCheck(user, date) {
+    const t = ist().date, win = settings().regularizeWindow;
+    if (date >= t) return { error: date === t ? 'Today is not over yet. Check in or out from the Home screen; corrections are for earlier days.' : 'You can only correct days that have already passed, not upcoming days.' };
+    if (date < addDays(t, -win)) return { error: `Corrections are allowed for the last ${win} days only.` };
+    const d = dayFor(user, date);
+    if (d.status === 'na') return { error: 'That date is outside your engagement.' };
+    if (d.check_in && d.check_out) return { error: 'Check-in and check-out are both recorded for that day, so there is nothing to correct.' };
+    if (d.check_in) return { missing: 'out', day: d };
+    if (d.status === 'absent' || (d.status === 'leave' && d.half)) return { missing: 'in', day: d };
+    return { error: d.status === 'holiday' ? 'That day is a holiday, so no punch is missing.' : d.status === 'weekend' ? 'That day is a weekly off, so no punch is missing.' : 'You are on leave that day, so no punch is missing.' };
+  }
+  function regularizable(user) {
+    const t = ist().date, from = [addDays(t, -settings().regularizeWindow), user.start_date].sort().at(-1);
+    const pending = new Set(all("SELECT date FROM att_regularizations WHERE user_id=? AND status='pending'", user.id).map((x) => x.date));
+    const days = [];
+    for (let d = addDays(t, -1); d >= from; d = addDays(d, -1)) {
+      if (pending.has(d)) continue;
+      const c = regularizeCheck(user, d);
+      if (c.missing) days.push({ date: d, missing: c.missing, check_in: c.day.check_in ? ist(new Date(c.day.check_in)).hhmm : null });
+    }
+    return days;
+  }
+
   // ---------- leave policy engine ----------
   function countLeaveDays(user, type, from, to, half) {
     if (half) return 0.5;
@@ -297,7 +324,7 @@ export function makeCore(db) {
   return {
     all, get, run, settings, rawSettings, publicUser, listShifts, defaultShift, shiftOf, shiftRow,
     holidayMap, optionalHolidayMap, isWorkingDay, approvedLeaves, dayInfo, dayFor, stateOf, buildCalendar,
-    trackedUsers, isUntracked, celebrations, reporteeIds, isManager, managerOf, canView, canDecide, notify, notifyHr, notifyApprovers, pendingApprovalCount,
+    trackedUsers, isUntracked, celebrations, regularizeCheck, regularizable, reporteeIds, isManager, managerOf, canView, canDecide, notify, notifyHr, notifyApprovers, pendingApprovalCount,
     countLeaveDays, compoffBalance, balanceFor, typesFor, leaveBalances, daysBetween,
   };
 }

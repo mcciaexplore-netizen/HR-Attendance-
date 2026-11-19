@@ -31,7 +31,7 @@ export default function Attendance() {
   const s = cal.data?.summary;
   const rows = (cal.data?.days || []).filter((d) => d.date <= today && d.status !== 'na').reverse();
   const who = (people.data || []).find((p) => String(p.id) === uid);
-  const canFix = (d) => own && !hr && ['absent', 'missed', 'half'].includes(d.status);
+  const canFix = (d) => own && !hr && ['absent', 'missed'].includes(d.status);
 
   const csv = () => downloadCsv(`attendance-${(who?.emp_code || user.emp_code)}-${month}.csv`,
     ['Date', 'Day', 'Check-in', 'Check-out', 'Hours', 'Late (min)', 'Early out (min)', 'Excess/deficit (min)', 'Status', 'Where'],

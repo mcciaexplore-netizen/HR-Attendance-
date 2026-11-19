@@ -53,6 +53,7 @@ function General() {
       <section className="card stack">
         <div className="card-h" style={{ margin: 0 }}><Icon n="clock" /><h2>Comp-off & late-in rules</h2></div>
         <div className="grid g3">
+          <div className="field"><label>Corrections allowed for the last (days)</label><input value={f.regularize_window_days} onChange={set('regularize_window_days')} inputMode="numeric" /><span className="small muted">only for a missed check-in or check-out</span></div>
           <div className="field"><label>Comp-off valid for (days)</label><input value={f.compoff_expiry_days} onChange={set('compoff_expiry_days')} inputMode="numeric" /><span className="small muted">counted from the day worked</span></div>
           <div className="field"><label>Can request within (days)</label><input value={f.compoff_window_days} onChange={set('compoff_window_days')} inputMode="numeric" /><span className="small muted">after the day worked</span></div>
           <div className="field"><label>Late marks = half-day</label><input value={f.late_marks_per_halfday} onChange={set('late_marks_per_halfday')} inputMode="numeric" /><span className="small muted">0 = off. Shown in the monthly report.</span></div>

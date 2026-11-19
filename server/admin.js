@@ -141,6 +141,7 @@ export function registerAdmin(r, { core, hrOnly, httpErr, wrap }) {
       if (!String(b[k] || '').split(',').every((v) => /^\d{2}:\d{2}$/.test(v.trim()) || !v.trim())) throw httpErr(400, `${k}: use HH:MM, comma separated`);
     if (!(+b.compoff_expiry_days >= 1 && +b.compoff_expiry_days <= 365)) throw httpErr(400, 'Comp-off validity must be 1–365 days');
     if (!(+b.compoff_window_days >= 1 && +b.compoff_window_days <= 90)) throw httpErr(400, 'Comp-off request window must be 1–90 days');
+    if (b.regularize_window_days !== undefined && !(+b.regularize_window_days >= 1 && +b.regularize_window_days <= 366)) throw httpErr(400, 'Corrections window must be 1–366 days');
     if (!(+b.late_marks_per_halfday >= 0 && +b.late_marks_per_halfday <= 10)) throw httpErr(400, 'Late marks per half-day must be 0–10');
     for (const k of Object.keys(DEFAULT_SETTINGS)) if (b[k] !== undefined) run('INSERT OR REPLACE INTO att_settings(key,value) VALUES (?,?)', k, String(b[k]).trim());
     res.json(core.rawSettings());
